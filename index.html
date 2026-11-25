@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>おおきな字幕</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
+    background: #000; color: #fff;
+    display: flex; flex-direction: column;
+    -webkit-user-select: none; user-select: none;
+  }
+  body.light { background: #fff; color: #000; }
+
+  /* 表示エリア */
+  #screen {
+    flex: 1; overflow-y: auto; padding: 24px 20px;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    transition: transform .3s;
+  }
+  body.flip #screen { transform: rotate(180deg); }
+  .line {
+    font-size: var(--fs, 56px); font-weight: 700; line-height: 1.35;
+    margin-bottom: .4em; word-break: break-all;
+  }
+  .line.old { opacity: .45; font-size: calc(var(--fs, 56px) * .6); }
+  #interim { color: #ffd84d; }
+  body.light #interim { color: #b35c00; }
+  #hint { font-size: 28px; opacity: .6; text-align: center; margin: auto 0; }
+
+  /* 操作パネル */
+  #panel {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    background: #1a1a1a;
+  }
+  body.light #panel { background: #e8e8e8; }
+  button {
+    font-size: 20px; font-weight: 700; padding: 14px 4px;
+    border: none; border-radius: 12px; background: #333; color: #fff;
+  }
+  body.light button { background: #fff; color: #000; border: 1px solid #aaa; }
+  #mic {
+    grid-column: 1 / -1; font-size: 28px; padding: 20px;
+    background: #1f7a3a; color: #fff;
+  }
+  #mic.on { background: #c62828; }
+</style>
+</head>
+<body>
+  <div id="screen">
+    <div id="hint">下の「話す」を押して<br>話しかけてください</div>
+    <div id="lines"></div>
+    <div id="interim" class="line"></div>
+  </div>
+
+  <div id="panel">
+    <button id="mic">🎤 話す</button>
+    <button id="smaller">文字 小</button>
+    <button id="bigger">文字 大</button>
+    <button id="flip">向き反転</button>
+    <button id="clear">消す</button>
+    <button id="theme" style="grid-column: span 4">白黒反転</button>
+  </div>
+
+<script>
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const $ = id => document.getElementById(id);
+const linesEl = $('lines'), interimEl = $('interim'), hint = $('hint'), mic = $('mic');
+let rec = null, listening = false, wakeLock = null;
+let fs = parseInt(localStorage.getItem('fs') || '56', 10);
+
+function applyFs() {
+  document.documentElement.style.setProperty('--fs', fs + 'px');
+  try { localStorage.setItem('fs', fs); } catch (e) {}
+}
+applyFs();
+
+function addLine(text) {
+  [...linesEl.children].forEach(el => el.classList.add('old'));
+  const d = document.createElement('div');
+  d.className = 'line';
+  d.textContent = text;
+  linesEl.appendChild(d);
+  while (linesEl.children.length > 5) linesEl.removeChild(linesEl.firstChild); // 直近5件だけ残す
+  $('screen').scrollTop = $('screen').scrollHeight;
+}
+
+function setupRecognition() {
+  rec = new SR();
+  rec.lang = 'ja-JP';
+  rec.interimResults = true;   // 話している途中も表示
+  rec.continuous = true;
+
+  rec.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) addLine(t);
+      else interim += t;
+    }
+    interimEl.textContent = interim;
+    hint.style.display = 'none';
+  };
+  // 無音などで止まったら自動で再開
+  rec.onend = () => { if (listening) { try { rec.start(); } catch (e) {} } };
+  rec.onerror = e => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      alert('マイクの使用が許可されていません。ブラウザの設定で許可してください。');
+      stop();
+    }
+  };
+}
+
+async function start() {
+  if (!SR) { alert('このブラウザは音声認識に対応していません。\nAndroidはChrome、iPhoneはSafariでお使いください。'); return; }
+  if (!rec) setupRecognition();
+  listening = true;
+  try { rec.start(); } catch (e) {}
+  mic.textContent = '■ 止める'; mic.classList.add('on');
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch (e) {} // 画面を消さない
+}
+function stop() {
+  listening = false;
+  try { rec && rec.stop(); } catch (e) {}
+  mic.textContent = '🎤 話す'; mic.classList.remove('on');
+  interimEl.textContent = '';
+  try { wakeLock && wakeLock.release(); } catch (e) {}
+}
+
+mic.onclick = () => listening ? stop() : start();
+$('bigger').onclick  = () => { fs = Math.min(fs + 8, 140); applyFs(); };
+$('smaller').onclick = () => { fs = Math.max(fs - 8, 24);  applyFs(); };
+$('flip').onclick    = () => document.body.classList.toggle('flip');
+$('theme').onclick   = () => document.body.classList.toggle('light');
+$('clear').onclick   = () => { linesEl.innerHTML = ''; interimEl.textContent = ''; hint.style.display = ''; };
+</script>
+</body>
+</html>
